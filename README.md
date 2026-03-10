@@ -1,71 +1,138 @@
 # MushAI
 
-Черновой pet-проект с агентами на базе AutoGen:
-- `chief.py` — агент с веб-поиском и отправкой сообщений в Telegram.
-- `magnetic.py` — Magentic-One команда (FileSurfer, WebSurfer, Coder, Terminal).
+MushAI — локальный автономный агентный проект на базе AutoGen Magentic-One с выполнением кода, веб-навигацией, файловыми операциями и чат-интерфейсом на Gradio.
 
-## Что нужно
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![AutoGen](https://img.shields.io/badge/AutoGen-0.7.5-412991)
+![Gradio](https://img.shields.io/badge/Gradio-6.9.0-F97316?logo=gradio&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-required-2496ED?logo=docker&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-- Python 3.11+
-- Ключ OpenAI (`OPENAI_API_KEY`)
-- Для `chief.py`: ключ Serper (`SERPER_API_KEY`) и Telegram bot credentials
+## Пример интерфейса
 
-## Установка
+![MushAI UI Example](img/image.png)
 
-```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-playwright install chromium
-```
+## Возможности
 
-## Конфиг окружения
+- Оркестрация нескольких агентов (`FileSurfer`, `WebSurfer`, `Coder`, `ComputerTerminal`, `UserProxy`)
+- Безопасное выполнение кода в Docker-песочнице (рекомендуется)
+- Локальный режим выполнения для быстрых итераций
+- Управление правилами поведения агента через YAML (`config/prompts/magnetic_one.yml`)
+- Установка зависимостей на лету (`pip install` при `ModuleNotFoundError`)
+- Полный цикл работы с файлами: просмотр, создание/изменение, проверка, отчет о сохраненных путях
+- Gradio-чат с live-прогрессом, уточняющими вопросами и кнопкой `Stop`
 
-Создай `config/.env`:
-
-```env
-OPENAI_API_KEY=your_openai_key
-MODEL_BASE_URL=https://api.openai.com/v1
-MODEL_NAME=gpt-5
-
-SERPER_API_KEY=your_serper_key
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-TELEGRAM_CHAT_ID=your_telegram_chat_id
-
-# optional
-PROMPTS_FILE=config/prompts/chief_agents.yml
-```
-
-## Запуск
-
-`chief.py`:
-
-```powershell
-.\venv\Scripts\python.exe chief.py
-```
-
-`magnetic.py`:
-
-```powershell
-.\venv\Scripts\python.exe magnetic.py
-```
-
-При запуске `magnetic.py` нужно ввести задачу в консоль.
-
-## Структура
+## Структура проекта
 
 ```text
 MushAI/
-  chief.py
   magnetic.py
-  creator.py
-  modules/
-    telegram_bot.py
+  UI/
+    gradio_ui.py
   config/
+    .env.example
     prompts/
-      chief_agents.yml
+      magnetic_one.yml
+  .magentic_workspace/
+  Dockerfile
+  requirements.txt
 ```
 
-## Статус проекта
+## Требования
 
-Проект в ранней стадии разработки. Интерфейс и структура могут часто меняться.
+- Python `3.11+`
+- Docker Engine (для `CODE_EXECUTOR_MODE=docker`)
+- API-ключ OpenAI-совместимого провайдера
+
+## Быстрый старт
+
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+playwright install chromium
+cp config/.env.example config/.env
+```
+
+Сборка Docker-образа для песочницы:
+
+```bash
+docker build -t autogen-custom-python .
+docker version
+```
+
+## Конфигурация
+
+Укажите переменные в `config/.env`:
+
+| Переменная | Описание | Пример |
+|---|---|---|
+| `OPENAI_API_KEY` | Ключ OpenAI-совместимого API | `sk-...` |
+| `MODEL_BASE_URL` | Базовый URL API модели | `https://api.openai.com/v1` |
+| `MODEL_NAME` | Имя модели для агентов | `gpt-5` |
+| `MAGNETIC_PROMPTS_FILE` | Путь к YAML с правилами | `config/prompts/magnetic_one.yml` |
+| `CODE_EXECUTOR_MODE` | Режим экзекьютора (`docker` или `local`) | `docker` |
+| `CODE_EXECUTOR_IMAGE` | Docker-образ для выполнения кода | `autogen-custom-python` |
+
+## Запуск
+
+Gradio UI:
+
+```bash
+venv/bin/python UI/gradio_ui.py
+```
+
+CLI:
+
+```bash
+venv/bin/python magnetic.py
+```
+
+URL UI по умолчанию: `http://127.0.0.1:7860`
+
+## Режимы выполнения кода
+
+### Docker (рекомендуется)
+
+- Используется `DockerCommandLineCodeExecutor`
+- Код выполняется изолированно внутри контейнера
+- Рабочая директория монтируется в контейнер для сохранения артефактов
+
+### Local
+
+```env
+CODE_EXECUTOR_MODE=local
+```
+
+Используйте только в изолированном виртуальном окружении.
+
+## Правила агента (YAML)
+
+Файл `config/prompts/magnetic_one.yml` управляет правилами через `prompt_rules`.
+
+Включая:
+
+- автономность и минимизацию лишних уточнений
+- awareness рабочей директории (`pwd`, `ls -la`)
+- проверку созданных/измененных файлов (`test -f`, `ls -l`, `head`/`cat`)
+- стратегию управления зависимостями
+- обязательное указание проверенных путей файлов в финальном ответе
+
+Если YAML отсутствует или поврежден, `magnetic.py` использует встроенный fallback-набор правил.
+
+## Где искать артефакты
+
+Обычно файлы, созданные агентом, сохраняются в:
+
+- `.magentic_workspace/`
+
+Проверка:
+
+```bash
+ls -la .magentic_workspace
+find .magentic_workspace -maxdepth 3 -type f
+```
+
+## Лицензия
+
+MIT License. См. [LICENSE](LICENSE).

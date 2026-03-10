@@ -12,6 +12,10 @@ __pycache__/
 .magentic_workspace/
 .tools/
 
+# Project parts not used in this profile
+chief.py
+modules/
+
 # Secrets
 config/.env
 .env

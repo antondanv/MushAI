@@ -1,5 +1,7 @@
 autogen-agentchat==0.7.5
 autogen-ext[magentic-one,openai,web-surfer]==0.7.5
+docker==7.1.0
+asyncio-atexit==1.0.1
 langchain-community==0.3.31
 python-dotenv==1.2.1
 PyYAML==6.0.3
