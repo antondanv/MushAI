@@ -1,0 +1,25 @@
+# Virtual env
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Local runtime/work dirs
+.magentic_workspace/
+.tools/
+
+# Secrets
+config/.env
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
