@@ -6,7 +6,6 @@ import time
 from typing import Any
 
 import gradio as gr
-from autogen_core import CancellationToken
 
 # Ensure project root is importable when launched as `python UI/gradio_ui.py`.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -24,26 +23,6 @@ from magnetic import (  # noqa: E402
 
 
 MAX_LIVE_STEPS = 28
-STOP_SENTINEL = "__STOP__"
-
-
-def _new_session_state() -> dict[str, Any]:
-    return {
-        "running": False,
-        "awaiting_input": False,
-        "events": None,
-        "input_queue": None,
-        "stop_event": None,
-        "progress": [],
-    }
-
-
-def _ensure_session_state(state: dict[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(state, dict):
-        return _new_session_state()
-    merged = _new_session_state()
-    merged.update(state)
-    return merged
 
 
 def _content_to_text(content: Any) -> str:
@@ -120,6 +99,7 @@ def _format_event(event: Any) -> str | None:
 
 
 def _trim_progress_steps(steps: list[str]) -> list[str]:
+    # Hide first/last orchestration states as requested (technical noise).
     if len(steps) <= 2:
         return []
     return steps[1:-1]
@@ -143,10 +123,11 @@ def _history_context(history: list[dict[str, str]], limit: int = 8) -> str:
         if not isinstance(item, dict):
             continue
         role = item.get("role", "")
-        content = _content_to_text(item.get("content", "")).strip()
+        content = _content_to_text(item.get("content", ""))
+        content = content.strip()
         if not content:
             continue
-        if role == "assistant" and ("<thinking>" in content or content.startswith("Думаю...")):
+        if role == "assistant" and content.startswith("Думаю..."):
             continue
         if role == "user":
             lines.append(f"User: {content}")
@@ -155,13 +136,7 @@ def _history_context(history: list[dict[str, str]], limit: int = 8) -> str:
     return "\n".join(lines)
 
 
-def _worker_run_magentic(
-    user_text: str,
-    context: str,
-    events_q: Queue[tuple[str, Any]],
-    input_q: Queue[str],
-    stop_event: threading.Event,
-) -> None:
+def _worker_run_magentic(user_text: str, context: str, q: Queue[tuple[str, Any]]) -> None:
     async def _run() -> None:
         client = OpenAIChatCompletionClient(
             model=MODEL_NAME,
@@ -172,7 +147,6 @@ def _worker_run_magentic(
         work_dir = Path(".magentic_workspace").resolve()
         work_dir.mkdir(parents=True, exist_ok=True)
         executor = make_code_executor(work_dir=work_dir)
-
         if context:
             full_task = build_task(
                 "Контекст диалога:\n"
@@ -183,34 +157,15 @@ def _worker_run_magentic(
         else:
             full_task = build_task(user_text)
 
-        def ui_input_func(prompt: str = "") -> str:
-            events_q.put(("input_request", prompt))
-            while True:
-                if stop_event.is_set():
-                    raise RuntimeError("Остановлено пользователем.")
-                try:
-                    value = input_q.get(timeout=0.2)
-                except Empty:
-                    continue
-                if value == STOP_SENTINEL:
-                    raise RuntimeError("Остановлено пользователем.")
-                return value
-
         final_text = ""
         progress_lines: list[str] = []
-        cancellation = CancellationToken()
-
         async with executor as code_executor:
-            team = build_team(client=client, code_executor=code_executor, input_func=ui_input_func)
-            async for event in team.run_stream(task=full_task, cancellation_token=cancellation):
-                if stop_event.is_set():
-                    cancellation.cancel()
-                    raise RuntimeError("Остановлено пользователем.")
-
+            team = build_team(client=client, code_executor=code_executor)
+            async for event in team.run_stream(task=full_task):
                 line = _format_event(event)
                 if line is not None and (not progress_lines or progress_lines[-1] != line):
                     progress_lines.append(line)
-                    events_q.put(("progress", list(progress_lines)))
+                    q.put(("progress", list(progress_lines)))
 
                 if type(event).__name__ != "TaskResult":
                     continue
@@ -218,181 +173,73 @@ def _worker_run_magentic(
                     continue
                 final_text = _content_to_text(event.messages[-1].content).strip()
 
-        events_q.put(("done", (final_text, list(progress_lines))))
+        q.put(("done", (final_text, list(progress_lines))))
 
     try:
         import asyncio
 
         asyncio.run(_run())
     except Exception as exc:
-        msg = str(exc)
-        if "Остановлено пользователем" in msg:
-            events_q.put(("stopped", None))
-        else:
-            events_q.put(("error", msg))
+        q.put(("error", str(exc)))
     finally:
-        events_q.put(("end", None))
+        q.put(("end", None))
 
 
-def _close_session(state: dict[str, Any]) -> dict[str, Any]:
-    state["running"] = False
-    state["awaiting_input"] = False
-    state["events"] = None
-    state["input_queue"] = None
-    state["stop_event"] = None
-    state["progress"] = []
-    return state
-
-
-def _stream_events(history: list[dict[str, str]], state: dict[str, Any]):
-    events_q: Queue[tuple[str, Any]] | None = state.get("events")
-    if events_q is None:
-        yield history, "", state
-        return
-
-    last_emit = time.time()
-    while True:
-        try:
-            kind, payload = events_q.get(timeout=1.0)
-        except Empty:
-            if time.time() - last_emit > 5:
-                yield history, "", state
-                last_emit = time.time()
-            continue
-
-        if kind == "progress":
-            progress_lines = payload
-            state["progress"] = progress_lines
-            if history and history[-1].get("role") == "assistant":
-                history[-1]["content"] = _render_thinking_block(progress_lines)
-            yield history, "", state
-            last_emit = time.time()
-            continue
-
-        if kind == "input_request":
-            state["awaiting_input"] = True
-            prompt = (payload or "Нужно уточнение").strip()
-            thinking = _render_thinking_block(state.get("progress", []))
-            if history and history[-1].get("role") == "assistant":
-                history[-1]["content"] = (
-                    f"{thinking}\n\n"
-                    f"Нужно уточнение от пользователя:\n{prompt}\n\n"
-                    "Напишите ответ в поле ниже и отправьте сообщение."
-                )
-            yield history, "", state
-            return
-
-        if kind == "done":
-            final_text, progress_lines = payload
-            thinking = _render_thinking_block(progress_lines)
-            answer = final_text or "Не удалось получить финальный ответ."
-            if history and history[-1].get("role") == "assistant":
-                history[-1]["content"] = f"{thinking}\n\n{answer}"
-            state = _close_session(state)
-            yield history, "", state
-            return
-
-        if kind == "stopped":
-            if history and history[-1].get("role") == "assistant":
-                history[-1]["content"] = "Генерация остановлена пользователем."
-            state = _close_session(state)
-            yield history, "", state
-            return
-
-        if kind == "error":
-            if history and history[-1].get("role") == "assistant":
-                history[-1]["content"] = f"Ошибка: {payload}"
-            state = _close_session(state)
-            yield history, "", state
-            return
-
-        if kind == "end":
-            if state.get("running"):
-                state = _close_session(state)
-                yield history, "", state
-            return
-
-
-def chat_with_magentic(message: str, history: list[dict[str, str]], session_state: dict[str, Any]):
-    state = _ensure_session_state(session_state)
+def chat_with_magentic(message: str, history: list[dict[str, str]]):
     history = history or []
     user_text = (message or "").strip()
-
     if not user_text:
-        yield history, "", state
-        return
-
-    if state.get("running") and state.get("awaiting_input"):
-        history = history + [{"role": "user", "content": user_text}]
-        input_q: Queue[str] | None = state.get("input_queue")
-        if input_q is not None:
-            input_q.put(user_text)
-        state["awaiting_input"] = False
-        yield history, "", state
-        yield from _stream_events(history, state)
-        return
-
-    if state.get("running") and not state.get("awaiting_input"):
-        history = history + [
-            {
-                "role": "assistant",
-                "content": "Сейчас уже выполняется предыдущая задача. Нажмите Stop или дождитесь завершения.",
-            }
-        ]
-        yield history, "", state
+        yield history, ""
         return
 
     context = _history_context(history)
     history = history + [{"role": "user", "content": user_text}]
     history = history + [{"role": "assistant", "content": _render_thinking_block([])}]
+    yield history, ""
 
-    events_q: Queue[tuple[str, Any]] = Queue()
-    input_q: Queue[str] = Queue()
-    stop_event = threading.Event()
-
-    state["running"] = True
-    state["awaiting_input"] = False
-    state["events"] = events_q
-    state["input_queue"] = input_q
-    state["stop_event"] = stop_event
-    state["progress"] = []
-
+    q: Queue[tuple[str, Any]] = Queue()
     worker = threading.Thread(
         target=_worker_run_magentic,
-        args=(user_text, context, events_q, input_q, stop_event),
+        args=(user_text, context, q),
         daemon=True,
     )
     worker.start()
 
-    yield history, "", state
-    yield from _stream_events(history, state)
+    last_emit = time.time()
+    while True:
+        try:
+            kind, payload = q.get(timeout=1.0)
+        except Empty:
+            # Heartbeat to keep the frontend connection alive on long steps.
+            if time.time() - last_emit > 5:
+                yield history, ""
+                last_emit = time.time()
+            continue
 
+        if kind == "progress":
+            progress_lines = payload
+            history[-1]["content"] = _render_thinking_block(progress_lines)
+            yield history, ""
+            last_emit = time.time()
+            continue
 
-def stop_generation(history: list[dict[str, str]], session_state: dict[str, Any]):
-    state = _ensure_session_state(session_state)
-    history = history or []
+        if kind == "done":
+            final_text, progress_lines = payload
+            thinking = _render_thinking_block(progress_lines)
+            answer = final_text or "Не удалось получить финальный ответ."
+            history[-1]["content"] = f"{thinking}\n\n{answer}"
+            yield history, ""
+            last_emit = time.time()
+            continue
 
-    if not state.get("running"):
-        return history, state
+        if kind == "error":
+            history[-1]["content"] = f"Ошибка: {payload}"
+            yield history, ""
+            last_emit = time.time()
+            continue
 
-    stop_event: threading.Event | None = state.get("stop_event")
-    if stop_event is not None:
-        stop_event.set()
-
-    input_q: Queue[str] | None = state.get("input_queue")
-    if input_q is not None:
-        input_q.put(STOP_SENTINEL)
-
-    if history and history[-1].get("role") == "assistant":
-        history[-1]["content"] = "Останавливаю генерацию..."
-    else:
-        history = history + [{"role": "assistant", "content": "Останавливаю генерацию..."}]
-
-    return history, state
-
-
-def clear_chat():
-    return "", [], _new_session_state()
+        if kind == "end":
+            break
 
 
 with gr.Blocks(title="Magentic-One Chat") as demo:
@@ -403,7 +250,6 @@ with gr.Blocks(title="Magentic-One Chat") as demo:
         buttons=["copy", "copy_all"],
         reasoning_tags=[("<thinking>", "</thinking>")],
     )
-    session_state = gr.State(_new_session_state())
 
     with gr.Row():
         msg = gr.Textbox(
@@ -413,14 +259,12 @@ with gr.Blocks(title="Magentic-One Chat") as demo:
             container=False,
         )
         send_btn = gr.Button("Отправить", variant="primary", scale=1)
-        stop_btn = gr.Button("Stop", variant="stop", scale=1)
 
-    clear_btn = gr.Button("Очистить")
+    clear_btn = gr.ClearButton([chatbot, msg], value="Очистить")
 
-    msg.submit(chat_with_magentic, inputs=[msg, chatbot, session_state], outputs=[chatbot, msg, session_state])
-    send_btn.click(chat_with_magentic, inputs=[msg, chatbot, session_state], outputs=[chatbot, msg, session_state])
-    stop_btn.click(stop_generation, inputs=[chatbot, session_state], outputs=[chatbot, session_state])
-    clear_btn.click(clear_chat, outputs=[msg, chatbot, session_state])
+    msg.submit(chat_with_magentic, inputs=[msg, chatbot], outputs=[chatbot, msg])
+    send_btn.click(chat_with_magentic, inputs=[msg, chatbot], outputs=[chatbot, msg])
+    clear_btn.click(lambda: ("", []), outputs=[msg, chatbot])
 
 
 if __name__ == "__main__":

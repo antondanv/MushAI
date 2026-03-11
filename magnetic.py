@@ -38,6 +38,20 @@ DEFAULT_PROMPT_RULES = [
     "KEEP IT SHORT: Terminate the task and provide the final concise answer to the user as soon as the data is successfully retrieved.",
     "LOCALIZATION: If the user writes in their own language, not English, then you also do everything and respond in their language.",
 ]
+MAX_VALIDATION_RETRIES = 2
+
+
+def is_validation_error(exc: Exception) -> bool:
+    seen_ids = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen_ids:
+        seen_ids.add(id(current))
+        error_name = type(current).__name__.lower()
+        error_text = str(current).lower()
+        if "validationerror" in error_name or "validation error" in error_text:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def _load_prompt_rules() -> list[str]:
@@ -59,14 +73,6 @@ def _load_prompt_rules() -> list[str]:
 
 
 PROMPT_RULES = _load_prompt_rules()
-
-
-def read_task() -> str:
-    print("Enter task for Magentic-One and press Enter:")
-    task = input("> ").strip()
-    if not task:
-        raise RuntimeError("Task is empty")
-    return task
 
 
 def approval_func(_request):
@@ -129,52 +135,6 @@ def make_code_executor(work_dir: Path):
     )
 
 
-async def run_once(client, task: str) -> None:
-    work_dir = Path(".magentic_workspace").resolve()
-    work_dir.mkdir(parents=True, exist_ok=True)
-    executor = make_code_executor(work_dir=work_dir)
-    
-    async with executor as code_executor:
-        team = build_team(client=client, code_executor=code_executor)
-        
-        print("\n--- Начало выполнения задачи ---")
-        
-        async for message in team.run_stream(task=task):
-            # 1. ЛОВИМ ФИНАЛЬНЫЙ ОТВЕТ
-            if type(message).__name__ == "TaskResult":
-                print("\n" + "="*50)
-                print("🎯 ФИНАЛЬНЫЙ ОТВЕТ СИСТЕМЫ:")
-                # Достаем последнее содержательное сообщение из списка
-                if message.messages:
-                    final_text = message.messages[-1].content
-                    if isinstance(final_text, list):
-                        final_text = " ".join([str(item) for item in final_text if isinstance(item, str)])
-                    print(final_text)
-                print("="*50 + "\n")
-                continue
-
-            # 2. ОБРАБАТЫВАЕМ ПРОМЕЖУТОЧНЫЕ ШАГИ (краткий лог)
-            if not hasattr(message, 'source'):
-                continue
-                
-            source = message.source
-            text_content = ""
-            
-            if hasattr(message, 'content'):
-                if isinstance(message.content, str):
-                    text_content = message.content
-                elif isinstance(message.content, list):
-                    text_content = " ".join([str(item) for item in message.content if isinstance(item, str)])
-            
-            if text_content:
-                clean_text = " ".join(text_content.split())
-                # Оставляем только первые 100 символов для компактности
-                if len(clean_text) > 100:
-                    clean_text = clean_text[:100] + "..."
-                
-                print(f"🔹 [{source}]: {clean_text}")
-
-
 async def main() -> None:
     client = OpenAIChatCompletionClient(
         model=MODEL_NAME,
@@ -182,8 +142,82 @@ async def main() -> None:
         max_retries=5,
     )
 
-    task = build_task(read_task())
-    await run_once(client=client, task=task)
+    work_dir = Path(".magentic_workspace").resolve()
+    work_dir.mkdir(parents=True, exist_ok=True)
+    executor = make_code_executor(work_dir=work_dir)
+    
+    async with executor as code_executor:
+        team = build_team(client=client, code_executor=code_executor)
+        
+        print("\n" + "="*50)
+        print("🤖 Система готова к работе! (Введите 'exit', 'quit' или 'выход' для завершения)")
+        print("="*50)
+
+        while True:
+            try:
+                user_input = input("\nВаша задача > ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nЗавершение работы...")
+                break
+                
+            if not user_input:
+                continue
+            if user_input.lower() in ['exit', 'quit', 'выход']:
+                print("Завершение работы...")
+                break
+                
+            task = build_task(user_input)
+            attempt = 0
+
+            while True:
+                if attempt == 0:
+                    print("\n--- Начало выполнения задачи ---")
+                else:
+                    print(f"\n--- Повторный запуск задачи ({attempt}/{MAX_VALIDATION_RETRIES}) ---")
+
+                try:
+                    async for message in team.run_stream(task=task):
+                        
+                        if type(message).__name__ == "TaskResult":
+                            print("\n" + "="*50)
+                            print("🎯 ФИНАЛЬНЫЙ ОТВЕТ АГЕНТА:")
+                            if hasattr(message, 'messages') and message.messages:
+                                final_text = message.messages[-1].content
+                                if isinstance(final_text, list):
+                                    final_text = " ".join([str(item) for item in final_text if isinstance(item, str)])
+                                print(final_text)
+                            print("="*50 + "\n")
+                            continue
+
+                        # 2. ОБРАБАТЫВАЕМ ПРОМЕЖУТОЧНЫЕ ШАГИ
+                        if not hasattr(message, 'source'):
+                            continue
+                            
+                        source = message.source
+                        text_content = ""
+                        
+                        if hasattr(message, 'content'):
+                            if isinstance(message.content, str):
+                                text_content = message.content
+                            elif isinstance(message.content, list):
+                                text_content = " ".join([str(item) for item in message.content if isinstance(item, str)])
+                        
+                        if text_content:
+                            clean_text = " ".join(text_content.split())
+                            # Оставляем только первые 100 символов для компактности
+                            if len(clean_text) > 100:
+                                clean_text = clean_text[:100] + "..."
+                            
+                            print(f"🔹 [{source}]: {clean_text}")
+                    break
+                except Exception as e:
+                    if is_validation_error(e) and attempt < MAX_VALIDATION_RETRIES:
+                        attempt += 1
+                        print(f"⚠️ Модель ответила некорректным форматом. Перезапускаю задачу ({attempt}/{MAX_VALIDATION_RETRIES})...")
+                        continue
+
+                    print(f"❌ Произошла ошибка при выполнении: {e}")
+                    break
 
 
 if __name__ == "__main__":
