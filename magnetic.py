@@ -177,7 +177,6 @@ async def main() -> None:
 
                 try:
                     async for message in team.run_stream(task=task):
-                        
                         if type(message).__name__ == "TaskResult":
                             print("\n" + "="*50)
                             print("🎯 ФИНАЛЬНЫЙ ОТВЕТ АГЕНТА:")
@@ -202,7 +201,7 @@ async def main() -> None:
                             elif isinstance(message.content, list):
                                 text_content = " ".join([str(item) for item in message.content if isinstance(item, str)])
                         
-                        if text_content:
+                        if text_content and type(message).__name__ != "TaskResult" and task not in text_content:
                             clean_text = " ".join(text_content.split())
                             # Оставляем только первые 100 символов для компактности
                             if len(clean_text) > 100:
