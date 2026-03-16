@@ -1,138 +1,84 @@
 # MushAI
 
-MushAI — локальный автономный агентный проект на базе AutoGen Magentic-One с выполнением кода, веб-навигацией, файловыми операциями и чат-интерфейсом на Gradio.
+MushAI - это персональный agent runtime на Python, который строится вокруг `Magentic-One team` и постепенно превращается из прототипа в нормальную исполняющую систему с состоянием, сессиями, sandbox execution и несколькими каналами входа.
 
-![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
-![AutoGen](https://img.shields.io/badge/AutoGen-0.7.5-412991)
-![Gradio](https://img.shields.io/badge/Gradio-6.9.0-F97316?logo=gradio&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-required-2496ED?logo=docker&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-green)
+Текущая ветка уже не про старый UI-first прототип. Сейчас проект переупаковывается в более понятную архитектуру: отдельные слои для runtime, конфигурации, API, хранения состояния и будущих расширений.
 
-## Пример интерфейса
+## Что это за проект
 
-![MushAI UI Example](img/image.png)
+Главная идея MushAI: не делать очередного чат-бота, а собрать единое ядро, которое:
 
-## Возможности
+- принимает задачи из разных каналов;
+- запускает команду агентов, а не одного "универсального" бота;
+- умеет искать информацию, работать с файлами и выполнять код;
+- сохраняет состояние выполнения и артефакты;
+- со временем сможет поддерживать branch-сценарии, scheduler и расширяемые capabilities.
 
-- Оркестрация нескольких агентов (`FileSurfer`, `WebSurfer`, `Coder`, `ComputerTerminal`, `UserProxy`)
-- Безопасное выполнение кода в Docker-песочнице (рекомендуется)
-- Локальный режим выполнения для быстрых итераций
-- Управление правилами поведения агента через YAML (`config/prompts/magnetic_one.yml`)
-- Установка зависимостей на лету (`pip install` при `ModuleNotFoundError`)
-- Полный цикл работы с файлами: просмотр, создание/изменение, проверка, отчет о сохраненных путях
-- Gradio-чат с live-прогрессом, уточняющими вопросами и кнопкой `Stop`
+Базовый стек в этой ветке:
 
-## Структура проекта
+- Python
+- AutoGen AgentChat / AutoGen Ext
+- `MagenticOneGroupChat` как основной execution engine
+- Docker как основной sandbox для выполнения кода
+- `.env` и YAML-конфигурация для настройки поведения
+
+## Что уже есть в этой ветке
+
+Репозиторий сейчас находится в стадии архитектурной сборки. Уже зафиксированы основные решения и заложены базовые части новой структуры:
+
+- [`src/mushai/settings/config.py`](src/mushai/settings/config.py) - загрузка настроек проекта и путей.
+- [`src/mushai/execution/team_factory.py`](src/mushai/execution/team_factory.py) - сборка команды агентов, model client и code executor.
+- [`config/prompts/system/magnetic_one.yml`](config/prompts/system/magnetic_one.yml) - правила поведения команды.
+- [`Dockerfile`](Dockerfile) - базовый образ для изолированного выполнения кода.
+- архитектурные документы, которые задают направление проекта.
+
+Часть модулей уже создана как каркас, но ещё не наполнена реализацией. Это нормально для этой ветки: сейчас цель не "замаскировать незавершённость", а аккуратно собрать правильное ядро.
+
+## Архитектурный вектор
+
+Проект движется в сторону такой схемы:
 
 ```text
-MushAI/
-  magnetic.py
-  UI/
-    gradio_ui.py
-  config/
-    .env.example
-    prompts/
-      magnetic_one.yml
-  .magentic_workspace/
-  Dockerfile
-  requirements.txt
+Channels / Adapters
+        ->
+API / Ingress
+        ->
+TeamRuntime
+        ->
+State + TeamFactory + Sandbox + Artifacts
 ```
 
-## Требования
+Ключевые принципы:
 
-- Python `3.11+`
-- Docker Engine (для `CODE_EXECUTOR_MODE=docker`)
-- API-ключ OpenAI-совместимого провайдера
+- transport-agnostic: CLI, HTTP и будущие каналы должны работать через одно ядро;
+- state-first: `sessions`, `runs`, `messages`, `checkpoints`, `artifacts` считаются частью основы, а не второстепенной функцией;
+- sandboxed by default: исполнение кода должно идти через контролируемую среду;
+- capability-driven: расширение проекта должно идти через оформленные возможности, а не через случайный набор скриптов.
 
-## Быстрый старт
+## Документы проекта
 
-```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-playwright install chromium
-cp config/.env.example config/.env
-```
+Если нужен более детальный контекст по направлению разработки, стоит смотреть сюда:
 
-Сборка Docker-образа для песочницы:
+- [`PROJECT_SCOPE.md`](PROJECT_SCOPE.md) - границы и цель проекта;
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) - целевая архитектурная схема;
+- [`DECISIONS.md`](DECISIONS.md) - зафиксированные архитектурные решения;
+- [`ROADMAP.md`](ROADMAP.md) - поэтапный план развития.
 
-```bash
-docker build -t autogen-custom-python .
-docker version
-```
+## Ближайшие планы
 
-## Конфигурация
+Ближайшая задача проекта - довести ветку до рабочего v1 runtime. Это означает:
 
-Укажите переменные в `config/.env`:
+- собрать `TeamRuntime` как центральный слой исполнения;
+- подключить рабочие CLI и HTTP adapters поверх общего runtime;
+- добавить persistence для `sessions`, `runs`, `messages`, `checkpoints` и `artifacts`;
+- завершить Docker sandbox lifecycle;
+- сделать базовую наблюдаемость и логи выполнения;
+- подготовить основу для summaries, scheduler и branch-сценариев.
 
-| Переменная | Описание | Пример |
-|---|---|---|
-| `OPENAI_API_KEY` | Ключ OpenAI-совместимого API | `sk-...` |
-| `MODEL_BASE_URL` | Базовый URL API модели | `https://api.openai.com/v1` |
-| `MODEL_NAME` | Имя модели для агентов | `gpt-5` |
-| `MAGNETIC_PROMPTS_FILE` | Путь к YAML с правилами | `config/prompts/magnetic_one.yml` |
-| `CODE_EXECUTOR_MODE` | Режим экзекьютора (`docker` или `local`) | `docker` |
-| `CODE_EXECUTOR_IMAGE` | Docker-образ для выполнения кода | `autogen-custom-python` |
+После этого MushAI должен стать не просто экспериментом с агентами, а устойчивым ядром, на которое уже можно безопасно наращивать новые режимы работы и каналы.
 
-## Запуск
+## Статус
 
-Gradio UI:
+Сейчас MushAI - это проект в активной переработке архитектуры. Важнее не скорость добавления новых фич, а то, чтобы следующая версия была собрана на понятной и расширяемой основе.
 
-```bash
-venv/bin/python UI/gradio_ui.py
-```
-
-CLI:
-
-```bash
-venv/bin/python magnetic.py
-```
-
-URL UI по умолчанию: `http://127.0.0.1:7860`
-
-## Режимы выполнения кода
-
-### Docker (рекомендуется)
-
-- Используется `DockerCommandLineCodeExecutor`
-- Код выполняется изолированно внутри контейнера
-- Рабочая директория монтируется в контейнер для сохранения артефактов
-
-### Local
-
-```env
-CODE_EXECUTOR_MODE=local
-```
-
-Используйте только в изолированном виртуальном окружении.
-
-## Правила агента (YAML)
-
-Файл `config/prompts/magnetic_one.yml` управляет правилами через `prompt_rules`.
-
-Включая:
-
-- автономность и минимизацию лишних уточнений
-- awareness рабочей директории (`pwd`, `ls -la`)
-- проверку созданных/измененных файлов (`test -f`, `ls -l`, `head`/`cat`)
-- стратегию управления зависимостями
-- обязательное указание проверенных путей файлов в финальном ответе
-
-Если YAML отсутствует или поврежден, `magnetic.py` использует встроенный fallback-набор правил.
-
-## Где искать артефакты
-
-Обычно файлы, созданные агентом, сохраняются в:
-
-- `.magentic_workspace/`
-
-Проверка:
-
-```bash
-ls -la .magentic_workspace
-find .magentic_workspace -maxdepth 3 -type f
-```
-
-## Лицензия
-
-MIT License. См. [LICENSE](LICENSE).
+Именно поэтому `README` в этой ветке описывает прежде всего смысл проекта и направление развития, а не старые сценарии запуска, которые больше не отражают реальное состояние репозитория.
