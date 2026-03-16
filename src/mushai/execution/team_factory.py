@@ -60,7 +60,7 @@ class MagneticTeamFactory:
             f"{numbered_rules}\n"
         )
     
-    def buid_folowup_task(self, user_text: str) -> str:
+    def buid_followup_task(self, user_text: str) -> str:
         return user_text.strip()
     
     def create_model_client(self) -> OpenAIChatCompletionClient:
