@@ -55,6 +55,9 @@ class Settings:
     code_executor_image: str
     workspace_dir: Path
     team_max_turns: int
+    hil_mode: bool
+    hil_timeout_seconds: int
+
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -83,6 +86,9 @@ class Settings:
             code_execution_timeout_seconds=int(
                 os.getenv("CODE_EXECUTION_TIMEOUT_SECONDS", "90")
             ),
+            hil_mode=os.getenv("HIL_MODE", "false").strip().lower() in {"1", "true", "yes", "on"},
+            hil_timeout_seconds=int(os.getenv("HIL_TIMEOUT_SECONDS", "300")),
+
         )
     
     @property
