@@ -2,8 +2,47 @@ from __future__ import annotations
 
 from mushai.execution.team_runtime import TeamRuntime
 from mushai.schemas.inbound import InboundMessage
+from mushai.schemas.outbound import OutboundEvent
 
 EXIT_COMMANDS = {"exit", "quit", "q", "выход"}
+
+def _render_event(event: OutboundEvent) -> str:
+    if event.type == "status":
+        return f"[status] {event.content}"
+    
+    if event.type == "agent_selected":
+        return f"[selected] {event.content}"
+    
+    if event.type == "thinking":
+        return f"[thinking] {event.source}: {event.content}"
+    
+    if event.type == "agent_message":
+        return f"[agent:{event.source}] {event.content}"
+    
+    if event.type == "tool_call":
+        return f"[tool_call] {event.source}: {event.content}"
+    
+    if event.type == "tool_result":
+        return f"[tool_result] {event.source}: {event.content}"
+    
+    if event.type == "code_generation":
+        return f"[code_generation] {event.source}: {event.content}"
+    
+    if event.type == "code_execution":
+        exit_code = event.metadata.get("exit_code")
+        suffix = f" (exit={exit_code})" if exit_code is not None else ""
+        return f"[code_execution] {event.source}{suffix}: {event.content}"
+
+    if event.type == "user_input_requested":
+        return f"[hil] {event.content}"
+    
+    if event.type == "final_message":
+        return f"\n[assistant] {event.content}"
+    
+    if event.type == "error":
+        return f"\n[error] {event.content}"
+    
+    return f"[{event.type}] {event.source}: {event.content}"
 
 async def run_cli() -> None:
     runtime = TeamRuntime()
@@ -34,17 +73,7 @@ async def run_cli() -> None:
             session_id=session_id,
         )
 
-        events = await runtime.run(message)
-
-        if events:
-            session_id = events[0].session_id
-
-        for event in events:
-            if event.type == "status":
-                print(f"[status] {event.content}")
-            elif event.type == "message":
-                print(f"\n[assistant] {event.content}")
-            elif event.type == "error":
-                print(f"\n[error] {event.content}")
-            else:
-                print(f"\n[{event.type}] {event.content}")
+        async for event in runtime.run_stream(message):
+            if session_id is None:
+                session_id =event.session_id
+            print(_render_event(event))
