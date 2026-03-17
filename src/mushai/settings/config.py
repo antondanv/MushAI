@@ -19,7 +19,7 @@ ENV_CANDIDATES = (
 def _load_env_files() -> None:
     for env_path in ENV_CANDIDATES:
         if env_path.exists():
-            load_dotenv(override=False)
+            load_dotenv(env_path, override=False)
 
 def _first_existing_path(*paths: Path) -> Path:
     for path in paths:
@@ -55,6 +55,8 @@ class Settings:
     code_executor_image: str
     workspace_dir: Path
     team_max_turns: int
+    team_max_stalls: int
+    code_execution_timeout_seconds: int
     hil_mode: bool
     hil_timeout_seconds: int
 
@@ -65,7 +67,7 @@ class Settings:
         prompts_file = (
             _resolve_path(prompts_value)
             if prompts_value
-            else _default_prompts_file.resolve()
+            else _default_prompts_file().resolve()
         )
 
         workspace_value = os.getenv("WORKSPACE_DIR", ".magnetic_workspace")
