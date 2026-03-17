@@ -160,5 +160,6 @@ class MagneticTeamFactory:
             participants,
             model_client=client,
             max_turns=self.settings.team_max_turns,
-            max_stalls=self.settings.team_max_stalls
+            max_stalls=self.settings.team_max_stalls,
+            emit_team_events=True,
         )
