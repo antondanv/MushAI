@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Callable
 
 import yaml
@@ -31,7 +30,7 @@ class MagneticTeamFactory:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
 
-    def load_prompt_rules(self) -> list(str):
+    def load_prompt_rules(self) -> list[str]:
         prompts_file = self.settings.magnetic_prompts_file
         if not prompts_file.exists():
             return DEFAULT_PROMPT_RULES
@@ -45,26 +44,26 @@ class MagneticTeamFactory:
         if not isinstance(prompt_rules, list):
             return DEFAULT_PROMPT_RULES
 
-        cleaned_rules = [str(rule).strip for rule in prompt_rules if str(rule).strip()]
+        cleaned_rules = [str(rule).strip() for rule in prompt_rules if str(rule).strip()]
 
         return cleaned_rules or DEFAULT_PROMPT_RULES
     
-    def build_inital_task(self, user_text: str) -> str:
+    def build_initial_task(self, user_text: str) -> str:
         rules = self.load_prompt_rules()
         numbered_rules = "\n".join(
-            f"{index}, {rule}" for index, rule in enumerate(rules, start=1)
+            f"{index}. {rule}" for index, rule in enumerate(rules, start=1)
         )
         return (
             f"Task: {user_text}\n\n"
-            "CRITICAL EXCECUTION CONSTRAINS:\n"
+            "CRITICAL EXECUTION CONSTRAINTS:\n"
             f"{numbered_rules}\n"
         )
     
-    def buid_followup_task(self, user_text: str) -> str:
+    def build_followup_task(self, user_text: str) -> str:
         return user_text.strip()
     
     def create_model_client(self) -> OpenAIChatCompletionClient:
-        client_kwargs = dict[str, Any] = {
+        client_kwargs: dict[str, Any] = {
             "model": self.settings.model_name,
             "base_url": self.settings.model_base_url,
             "max_retries": 5,
@@ -80,9 +79,9 @@ class MagneticTeamFactory:
         work_dir.mkdir(parents=True, exist_ok=True)
 
         if self.settings.code_executor_mode == "local":
-            return LocalCommandLineCodeExecutor(work_dir)
+            return LocalCommandLineCodeExecutor(work_dir=work_dir)
         
-        if self.settings.code_executor_image != "docker":
+        if self.settings.code_executor_mode != "docker":
             raise RuntimeError("CODE_EXECUTOR_MODE must be either 'docker' or 'local'.")
         
         try:
@@ -117,7 +116,7 @@ class MagneticTeamFactory:
             reason="Approved by human." if approved else "Rejected by human.",
         )
     
-    def defualt_input_func(self, prompt: str = "") -> str:
+    def default_input_func(self, prompt: str = "") -> str:
         if not self.settings.hil_mode:
             raise RuntimeError("User input was requested, but HIL mode is disabled.")
         return input(prompt or "Your answer > ")
@@ -153,7 +152,7 @@ class MagneticTeamFactory:
             participants.append(
                 UserProxyAgent(
                     "User",
-                    input_func=input_func or self.defualt_input_func
+                    input_func=input_func or self.default_input_func
                 )
             )
 
