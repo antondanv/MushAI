@@ -66,8 +66,8 @@ class TeamRuntime:
         run_id = str(uuid4())
         session = self._ensure_session(session_id)
 
-        client = self.factory.create_model_client
-        executor = self.factory.create_code_executor
+        client = self.factory.create_model_client()
+        executor = self.factory.create_code_executor()
 
         is_first_turn = session.team_state is None
         outbound_events: list[OutboundEvent] = [
@@ -94,9 +94,9 @@ class TeamRuntime:
                 
                 if session.team_state is not None:
                     await team.load_state(session.team_state)
-                    task = self.factory.buid_followup_task(message.text)
+                    task = self.factory.build_followup_task(message.text)
                 else:
-                    task = self.factory.build_inital_task(message.text)
+                    task = self.factory.build_initial_task(message.text)
                 
                 final_text = ""
 
@@ -124,7 +124,7 @@ class TeamRuntime:
                     session_id=session_id,
                     run_id=run_id,
                     source="team",
-                    trace=message.trace_id,
+                    trace_id=message.trace_id,
                     metadata={
                         "channel": message.channel,
                         "is_first_turn": is_first_turn,
@@ -135,12 +135,12 @@ class TeamRuntime:
         except Exception as exc:
             outbound_events.append(
                 OutboundEvent(
-                    type="erorr",
+                    type="error",
                     content=str(exc),
                     session_id=session_id,
                     run_id=run_id,
-                    source="team",
-                    trace=message.trace_id,
+                    source="runtime",
+                    trace_id=message.trace_id,
                     metadata={
                         "channel": message.channel,
                         "is_first_turn": is_first_turn,
