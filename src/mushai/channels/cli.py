@@ -75,5 +75,5 @@ async def run_cli() -> None:
 
         async for event in runtime.run_stream(message):
             if session_id is None:
-                session_id =event.session_id
+                session_id = event.session_id
             print(_render_event(event))

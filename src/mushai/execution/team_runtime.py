@@ -151,11 +151,12 @@ class TeamRuntime:
         if isinstance(event, UserInputRequestedEvent):
             return OutboundEvent(
                 type="user_input_requested",
-                contetn="Human input requested.",
+                content="Human input requested.",
                 session_id=session_id,
                 run_id=run_id,
                 source=source,
-                metadata={"request_id": event.request_id}
+                trace_id=trace_id,
+                metadata={"request_id": event.request_id},
             )
         
         if isinstance(event, BaseChatMessage):
@@ -213,7 +214,7 @@ class TeamRuntime:
                     await team.load_state(session.team_state)
                     task = self.factory.build_followup_task(message.text)
                 else:
-                    task = self.factory.build_initial_task
+                    task = self.factory.build_initial_task(message.text)
                 
                 final_text = ""
 
