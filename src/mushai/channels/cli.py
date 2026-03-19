@@ -56,6 +56,7 @@ async def run_cli() -> None:
     while True:
         try:
             user_text = input("\nYour task > ").strip()
+            print("\n")
         except (EOFError, KeyboardInterrupt):
             print("\nShutting down...")
             break
@@ -72,7 +73,7 @@ async def run_cli() -> None:
             channel="cli",
             session_id=session_id,
         )
-
+        
         async for event in runtime.run_stream(message):
             if session_id is None:
                 session_id = event.session_id
